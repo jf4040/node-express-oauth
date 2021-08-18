@@ -53,7 +53,7 @@ app.use(bodyParser.urlencoded({ extended: true }))
 
 
 app.get("/authorize", (req, res) => {
-	const clientID = req.query.clien_id
+	const clientID = req.query.client_id
 	const client = clients[clientId]
 
 	//iff the client does'nt exist, return 404
