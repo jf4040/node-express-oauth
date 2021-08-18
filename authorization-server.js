@@ -8,6 +8,7 @@ const {
 	decodeAuthCredentials,
 	timeout,
 } = require("./utils")
+const { url } = require("inspector")
 
 const config = {
 	port: 9001,
@@ -50,6 +51,103 @@ app.use(timeout)
 app.use(bodyParser.json())
 app.use(bodyParser.urlencoded({ extended: true }))
 
+
+app.get("/authorize", (req, res) => {
+	const clientID = req.query.clien_id
+	const client = clients[clientId]
+
+	//iff the client does'nt exist, return 404
+	if(!client){
+		res.status(401).send("Error: Client not Authorized")
+		return
+	}
+
+	//here we do input validation, check for correct type
+	if(
+		typeof req.query.scope !== "string" || 
+		!containsAll(client.scopes, req.query.scope.split(" "))
+	) {
+		res.status(401).send("Error: Invalif scopes requested")
+		return
+	}
+
+	const requestId = randomString()
+	requests[requestId] = req.query
+	res.render("login", {
+		client,
+		scope: req.query.scope,
+		requestId,
+	})
+
+	app.post("/approve", (req,res) => {
+		const { userName, password, requestId } = req.body
+		if(!userName || users[userName] !== password){
+			res.status(401).send("Error: user not authoruzed")
+			return
+		}
+
+		const clientReq = requests[requestId]
+		delete requests[requestId]
+
+		if(!clientReq){
+			res.status(401).send("Invalid User req")
+			return
+		}
+
+		const code = randomString()
+		authorizationCodes[code] = {clientReq, userName}
+		const redirectUri = url.parse(clientReq.redirect_uri)
+		redirectUri.query = {
+			code,
+			state: clientReq.state,
+		}
+
+		res.redirect(url.format(redirectUri))
+	})
+
+	app.post("/token", (req,res) => {
+		let authCredentials = req.headers.authorization
+		if(!authCredentials){
+			res.status(401).send("Error: not authorized")
+			return
+		}
+
+		const {clientId, clientSecret } = decodeAuthCredentials(authCredentials)
+		const client = clients[clientId]
+		if(!client || client.clientSecret !== clientSecret){
+			res.status(401).send("Error")
+			return
+		}
+
+		const code = req.body.code
+		if(!code || !authorizationCodes[code]){
+			res.status(401).send("Error")
+			return
+		}
+
+		const { clientReq, userName } = authorizationCodes[code]
+		delete authorizationCodes[code]
+		const token = jwt.sign(
+			{
+				userName,
+				scope: clientReq.scope,
+			},
+			config.privateKey,
+			{
+				algorithm:"RS256",
+				expiresIn: 300,
+				issuer: "http:localhost:" + config.port,
+			}
+		)
+
+		res.json({
+			access_token: token,
+			token_type: "Bearer",
+			scope: clientReq.scope,
+		})
+	})
+
+})
 /*
 Your code here
 */
